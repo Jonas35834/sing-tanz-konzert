@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sing & Tanz Konzert</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="shortcut icon" href="#">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body>
+
+    <header>
+        <div class="logo">🎭 <span class="event-title-display">Sing & Tanz Konzert</span></div>
+        <nav>
+            <a href="#about">Über das Konzert</a>
+            <a href="#booking">Tickets buchen</a>
+            <a href="#cancel-section">Ticket stornieren</a>
+            <button id="admin-login-btn" class="btn-secondary">Admin Login</button>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <div class="hero-content">
+            <h1 class="event-title-display">Sing & Tanz Konzert</h1>
+            <p>Ein familiäres Erlebnis voller Musik, Freude und Tanz von uns dreien!</p>
+            <div class="event-info">
+                <span>📅 <span id="display-date">15. November 2026</span></span>
+                <span>⏰ <span id="display-time">17:00 Uhr</span></span>
+                <span>📍 <span id="display-location">Stadthalle Musterstadt</span></span>
+                <span>🎟️ <span id="display-price">12.00</span> € / Ticket</span>
+            </div>
+            <a href="#booking" class="btn-primary">Jetzt Platz auswählen</a>
+        </div>
+    </section>
+
+    <section id="about" class="container">
+        <h2>Über unser Konzert</h2>
+        <p id="display-about-text">Wir drei Veranstalter laden euch herzlich zu einem unvergesslichen Nachmittag ein. Es erwartet euch eine familiäre Atmosphäre mit stimmungsvollem Live-Gesang und mitreißenden Tanzdarbietungen für Groß und Klein!</p>
+    </section>
+
+    <section id="booking" class="container">
+        <h2>Ticket buchen</h2>
+        <p>Wähle deinen Wunschplatz im Saalplan aus (Pro E-Mail-Adresse ist genau 1 Ticket erlaubt):</p>
+
+        <div class="stage">BÜHNE</div>
+        <div id="seating-map" class="seating-container"></div>
+
+        <div class="legend">
+            <span><span class="seat-sample available"></span> Frei</span>
+            <span><span class="seat-sample selected"></span> Ausgewählt</span>
+            <span><span class="seat-sample booked"></span> Belegt</span>
+            <span><span class="seat-sample blocked"></span> Gesperrt</span>
+        </div>
+
+        <div id="booking-form-container" class="card hidden">
+            <h3>Ausgewählter Platz: <span id="selected-seats-list">-</span></h3>
+            <h4>Gesamtsumme: <span id="total-price">0.00</span> €</h4>
+
+            <form id="booking-form">
+                <label>
+                    Dein Name:
+                    <input type="text" id="buyer-name" placeholder="Vor- und Nachname" required>
+                </label>
+                <label>
+                    Deine E-Mail-Adresse:
+                    <input type="email" id="buyer-email" placeholder="name@beispiel.de" required>
+                </label>
+
+                <button type="submit" class="btn-primary" style="margin-top: 15px;">Kostenpflichtig buchen & Ticket per E-Mail erhalten</button>
+            </form>
+        </div>
+    </section>
+
+    <section id="cancel-section" class="container">
+        <div class="card">
+            <h2>Ticket selbstständig stornieren</h2>
+            <p>Du kannst dein Konzertticket hier über deine angegebene E-Mail-Adresse stornieren:</p>
+            <div style="display: flex; gap: 10px; max-width: 500px; margin-top: 10px;">
+                <input type="email" id="cancel-email-input" placeholder="Deine E-Mail-Adresse" style="flex: 1;">
+                <button id="user-cancel-btn" class="btn-danger">Ticket stornieren</button>
+            </div>
+        </div>
+    </section>
+
+    <div id="login-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Veranstalter Login</h3>
+            <input type="email" id="admin-email" placeholder="E-Mail">
+            <input type="password" id="admin-password" placeholder="Passwort">
+            <button id="do-login-btn" class="btn-primary">Einloggen</button>
+            <button id="close-login-btn" class="btn-secondary">Abbrechen</button>
+        </div>
+    </div>
+
+    <section id="admin-dashboard" class="container hidden">
+        <div class="admin-header">
+            <h2>Admin Dashboard</h2>
+            <div>
+                <button id="toggle-pos-btn" class="btn-pos">🏧 Kassen- & Scanner-Modus (Vollbild)</button>
+                <button id="logout-btn" class="btn-secondary">Ausloggen</button>
+            </div>
+        </div>
+        
+        <hr>
+
+        <div id="pos-mode-container" class="pos-box hidden">
+            <div class="pos-header">
+                <h2>🏧 Abendkasse & Einlass-Scanner</h2>
+                <button id="close-pos-btn" class="btn-danger">❌ Kasse beenden & Vollbild schließen</button>
+            </div>
+            
+            <div class="scanner-section card">
+                <h4>Ticket scannen & entwerten</h4>
+                <div id="reader" style="width: 100%; max-width: 400px; margin: 0 auto;"></div>
+                <button id="restart-scanner-btn" class="btn-primary hidden" style="margin-top: 10px;">📷 Nächsten Code scannen</button>
+                
+                <div class="manual-scan" style="margin-top: 15px;">
+                    <input type="text" id="manual-ticket-id" placeholder="Ticket-ID manuell eingeben">
+                    <button id="check-ticket-btn" class="btn-primary">Prüfen / Entwerten</button>
+                </div>
+                <div id="scan-result" class="scan-status hidden"></div>
+            </div>
+
+            <hr>
+
+            <h3>🎟️ Barverkauf vor Ort</h3>
+            <p>Wähle Plätze im Plan aus und trage für jeden Platz einen Namen ein:</p>
+            <div id="pos-seating-map" class="seating-container"></div>
+            
+            <div id="pos-checkout" class="card">
+                <h4>Gewählte Plätze: <span id="pos-seats-list">-</span></h4>
+                <h4>Summe Barzahlung: <span id="pos-total-price">0.00</span> €</h4>
+                
+                <div id="pos-names-container">
+                    </div>
+
+                <button id="pos-submit-btn" class="btn-primary" style="margin-top: 15px;">Barzahlung abschließen</button>
+            </div>
+        </div>
+
+        <div class="admin-section card">
+            <h3>⚙️ Event-Einstellungen bearbeiten</h3>
+            <form id="event-settings-form">
+                <label>Konzert-Name: <input type="text" id="edit-title" required></label>
+                <label>Datum: <input type="text" id="edit-date" required></label>
+                <label>Uhrzeit: <input type="text" id="edit-time" required></label>
+                <label>Ort: <input type="text" id="edit-location" required></label>
+                <label>Ticketpreis (€): <input type="number" step="0.50" id="edit-price" required></label>
+                <label>Über uns Text: 
+                    <textarea id="edit-about" rows="4" style="width:100%; margin-top:5px; padding:8px;" required></textarea>
+                </label>
+                <button type="submit" class="btn-primary">Einstellungen speichern</button>
+            </form>
+        </div>
+
+        <hr>
+
+        <div class="admin-section">
+            <h3>🛋️ Saalplan-Editor</h3>
+            <div class="admin-controls">
+                <button id="add-row-btn" class="btn-secondary">+ Reihe hinzufügen</button>
+                <button id="save-layout-btn" class="btn-primary">Saalplan veröffentlichen</button>
+            </div>
+            <div id="admin-seating-editor" class="seating-container editor-mode"></div>
+        </div>
+
+        <hr>
+
+        <div class="admin-section">
+            <h3>📋 Einzelne Tickets & Status</h3>
+            <table id="bookings-table">
+                <thead>
+                    <tr>
+                        <th>Ticket-ID</th>
+                        <th>Name</th>
+                        <th>E-Mail</th>
+                        <th>Platz</th>
+                        <th>Status</th>
+                        <th>Preis</th>
+                        <th>Aktion</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <script src="app.js"></script>
+</body>
+</html>
