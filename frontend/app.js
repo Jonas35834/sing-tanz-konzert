@@ -265,7 +265,7 @@ document.getElementById('booking-form').addEventListener('submit', async (e) => 
 // RUFT DAS RENDER BACKEND AUF (Kein API-Key hier sichtbar!)
 async function sendEmailViaBackend(userEmail, userName, seatNumber, ticketId) {
     // ERSETZE DIESE URL MIT DEINER BACKEND-URL VON RENDER:
-    const BACKEND_URL = "https://DEIN-BACKEND-NAME.onrender.com/send-ticket";
+    const BACKEND_URL = "https://sing-tanz-konzert-backend.onrender.com/send-ticket";
 
     try {
         const response = await fetch(BACKEND_URL, {
