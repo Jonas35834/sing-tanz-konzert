@@ -21,7 +21,7 @@ app.post('/send-ticket', async (req, res) => {
 
     try {
         const data = await resend.emails.send({
-            from: 'Sing & Tanz Konzert <onboarding@resend.dev>',
+            from: 'Sing & Tanz Konzert <tickets@sing-tanz.jonas-hohl.de>',
             to: [email],
             subject: `Dein Ticket für ${eventConfig.title} (Platz ${seat})`,
             html: `
