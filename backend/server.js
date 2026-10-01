@@ -1,3 +1,4 @@
+```javascript
 const express = require('express');
 const cors = require('cors');
 const { Resend } = require('resend');
@@ -91,9 +92,11 @@ async function cleanupExpiredReservations() {
 
         const batch = adminDb.batch();
         let count = 0;
+
         snapshot.forEach(doc => {
             const data = doc.data();
             const expiresAt = Date.parse(data.expiresAt || '');
+
             if (Number.isFinite(expiresAt) && expiresAt <= now) {
                 batch.update(doc.ref, {
                     status: 'ABGELAUFEN',
@@ -116,14 +119,13 @@ async function cleanupExpiredReservations() {
 // In Render muss FIREBASE_SERVICE_ACCOUNT als komplette JSON-Zeichenkette hinterlegt sein.
 if (!admin.apps.length) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
     });
 }
 
 const adminDb = admin.firestore();
-
-
 
 // E-Mail-Bestätigungslink über Firebase erzeugen und anschließend mit Resend senden
 app.post('/send-verification', async (req, res) => {
@@ -146,29 +148,42 @@ app.post('/send-verification', async (req, res) => {
         const ticket = ticketSnap.data();
 
         if (String(ticket.email || '').toLowerCase() !== normalizedEmail) {
-            return res.status(403).json({ error: "E-Mail-Adresse und Buchung stimmen nicht überein." });
+            return res.status(403).json({
+                error: "E-Mail-Adresse und Buchung stimmen nicht überein."
+            });
         }
 
         if (ticket.status !== 'EMAIL_BESTAETIGUNG_AUSSTEHEND') {
-            return res.status(400).json({ error: "Diese Buchung wartet nicht mehr auf eine E-Mail-Bestätigung." });
+            return res.status(400).json({
+                error: "Diese Buchung wartet nicht mehr auf eine E-Mail-Bestätigung."
+            });
         }
 
         if (ticket.expiresAt && Date.parse(ticket.expiresAt) <= Date.now()) {
-            await ticketRef.update({ status: 'ABGELAUFEN', expiredAt: new Date().toISOString() });
-            return res.status(410).json({ error: "Die 5-Minuten-Reservierung ist abgelaufen. Bitte wähle den Platz erneut." });
+            await ticketRef.update({
+                status: 'ABGELAUFEN',
+                expiredAt: new Date().toISOString()
+            });
+
+            return res.status(410).json({
+                error: "Die 5-Minuten-Reservierung ist abgelaufen. Bitte wähle den Platz erneut."
+            });
         }
 
-        const continueUrl = process.env.PUBLIC_SITE_URL || 'https://sing-tanz.jonas-hohl.de/';
+        const continueUrl =
+            process.env.PUBLIC_SITE_URL ||
+            'https://sing-tanz.jonas-hohl.de/';
 
         const actionCodeSettings = {
             url: continueUrl,
             handleCodeInApp: true
         };
 
-        const verificationLink = await admin.auth().generateSignInWithEmailLink(
-            normalizedEmail,
-            actionCodeSettings
-        );
+        const verificationLink =
+            await admin.auth().generateSignInWithEmailLink(
+                normalizedEmail,
+                actionCodeSettings
+            );
 
         const safeName = String(name || ticket.name || 'Gast');
         const safeSeat = String(seat || ticket.seat || '');
@@ -180,15 +195,39 @@ app.post('/send-verification', async (req, res) => {
             html: `
                 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#fff;border:1px solid #eee;border-radius:14px;">
                     <h2 style="color:#e65c00;margin-top:0;">Sing & Tanz Konzert</h2>
+
                     <p>Hallo <strong>${safeName}</strong>,</p>
-                    <p>du hast den Sitzplatz <strong>${safeSeat}</strong> reserviert.</p>
-                    <p>Bitte bestätige deine E-Mail-Adresse, damit deine Buchung endgültig bestätigt wird:</p>
-                    <p style="text-align:center;margin:28px 0;">
-                        <a href="${verificationLink}" style="display:inline-block;background:#e65c00;color:#fff;text-decoration:none;padding:14px 24px;border-radius:9px;font-weight:bold;">E-Mail bestätigen</a>
+
+                    <p>
+                        du hast den Sitzplatz <strong>${safeSeat}</strong> reserviert.
                     </p>
-                    <p style="font-size:13px;color:#666;">Falls der Button nicht funktioniert, öffne den folgenden Link:</p>
-                    <p style="font-size:12px;word-break:break-all;color:#666;">${verificationLink}</p>
-                    <p style="font-size:13px;color:#777;">Nach der Bestätigung wird dein Ticket automatisch an diese E-Mail-Adresse geschickt.</p>
+
+                    <p>
+                        Bitte bestätige deine E-Mail-Adresse,
+                        damit deine Buchung endgültig bestätigt wird:
+                    </p>
+
+                    <p style="text-align:center;margin:28px 0;">
+                        <a
+                            href="${verificationLink}"
+                            style="display:inline-block;background:#e65c00;color:#fff;text-decoration:none;padding:14px 24px;border-radius:9px;font-weight:bold;"
+                        >
+                            E-Mail bestätigen
+                        </a>
+                    </p>
+
+                    <p style="font-size:13px;color:#666;">
+                        Falls der Button nicht funktioniert, öffne den folgenden Link:
+                    </p>
+
+                    <p style="font-size:12px;word-break:break-all;color:#666;">
+                        ${verificationLink}
+                    </p>
+
+                    <p style="font-size:13px;color:#777;">
+                        Nach der Bestätigung wird dein Ticket automatisch an diese
+                        E-Mail-Adresse geschickt.
+                    </p>
                 </div>
             `
         });
@@ -199,6 +238,7 @@ app.post('/send-verification', async (req, res) => {
         }
 
         res.status(200).json({ success: true });
+
     } catch (error) {
         console.error('Bestätigungs-E-Mail Fehler:', error);
         res.status(500).json({ error: error.message });
@@ -210,86 +250,279 @@ app.post('/send-ticket', async (req, res) => {
     const { email, name, seat, ticketId, eventConfig } = req.body;
 
     if (!email || !seat || !ticketId) {
-        return res.status(400).json({ error: "Fehlende Daten im Request" });
+        return res.status(400).json({
+            error: "Fehlende Daten im Request"
+        });
     }
 
     try {
         const ticketRef = adminDb.collection('tickets').doc(ticketId);
         const ticketSnap = await ticketRef.get();
-        if (!ticketSnap.exists) return res.status(404).json({ error: 'Ticket nicht gefunden.' });
-        const ticketData = ticketSnap.data();
-        if (ticketData.status !== 'GÜLTIG' || ticketData.emailVerified !== true) {
-            return res.status(400).json({ error: 'Das Ticket ist noch nicht per E-Mail bestätigt.' });
+
+        if (!ticketSnap.exists) {
+            return res.status(404).json({
+                error: 'Ticket nicht gefunden.'
+            });
         }
 
-        // Jeder Ticket-Link wird automatisch zufällig erzeugt. Keine Render-Variable nötig.
-        const cancellationToken = createCancellationToken();
-        await ticketRef.update({ cancellationToken });
+        const ticketData = ticketSnap.data();
 
-        // QR-Code als Data-URL Bild aus der Ticket-ID generieren
-        const qrCodeDataUrl = await QRCode.toDataURL(ticketId);
+        if (
+            ticketData.status !== 'GÜLTIG' ||
+            ticketData.emailVerified !== true
+        ) {
+            return res.status(400).json({
+                error: 'Das Ticket ist noch nicht per E-Mail bestätigt.'
+            });
+        }
+
+        // Jeder Ticket-Link wird automatisch zufällig erzeugt.
+        // Keine Render-Variable nötig.
+        const cancellationToken = createCancellationToken();
+
+        await ticketRef.update({
+            cancellationToken
+        });
+
+        /*
+         * QR-CODE
+         *
+         * Wichtig:
+         * Der QR-Code wird NICHT mehr als Data-URL in das HTML geschrieben.
+         *
+         * Stattdessen:
+         * 1. QR-Code als PNG-Buffer erzeugen
+         * 2. PNG als Base64-Anhang an Resend übergeben
+         * 3. Dem Bild eine eindeutige Content-ID geben
+         * 4. Im HTML mit cid:... darauf verweisen
+         *
+         * Dadurch wird der QR-Code als echtes Inline-Bild
+         * in der E-Mail eingebettet und funktioniert auch mit Gmail.
+         */
+        const qrCodeBuffer = await QRCode.toBuffer(ticketId, {
+            type: 'png',
+            width: 180,
+            margin: 2
+        });
+
+        const qrCodeContentId =
+            `ticket-qr-${crypto.randomBytes(12).toString('hex')}`;
 
         const data = await resend.emails.send({
             from: SENDER,
             to: [email],
             subject: `Dein Ticket für ${eventConfig.title} (Platz ${seat})`,
+
             html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e65c00; border-radius: 10px; max-width: 500px; margin: 0 auto; background-color: #ffffff;">
-                    <h2 style="color: #e65c00; margin-top: 0; text-align: center;">${eventConfig.title}</h2>
-                    <p>Hallo <strong>${name}</strong>,</p>
-                    <p>vielen Dank für deine Buchung! Hier ist dein offizielles Eintrittsticket:</p>
-                    
-                    <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                        <p style="margin: 5px 0;"><strong>Ticket-ID:</strong> <span style="font-size: 1.1em; color: #e65c00; font-weight: bold;">${ticketId}</span></p>
-                        <p style="margin: 5px 0;"><strong>Sitzplatz:</strong> ${seat}</p>
-                        <p style="margin: 5px 0;"><strong>Preis:</strong> ${eventConfig.price} €</p>
-                        <p style="margin: 5px 0;"><strong>Datum:</strong> ${eventConfig.date} um ${eventConfig.time}</p>
-                        <p style="margin: 5px 0;"><strong>Ort:</strong> ${eventConfig.location}</p>
+                <div style="
+                    font-family: Arial, sans-serif;
+                    padding: 20px;
+                    border: 1px solid #e65c00;
+                    border-radius: 10px;
+                    max-width: 500px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                ">
+
+                    <h2 style="
+                        color: #e65c00;
+                        margin-top: 0;
+                        text-align: center;
+                    ">
+                        ${eventConfig.title}
+                    </h2>
+
+                    <p>
+                        Hallo <strong>${name}</strong>,
+                    </p>
+
+                    <p>
+                        vielen Dank für deine Buchung!
+                        Hier ist dein offizielles Eintrittsticket:
+                    </p>
+
+                    <div style="
+                        background-color: #f9f9f9;
+                        padding: 15px;
+                        border-radius: 8px;
+                        margin: 15px 0;
+                    ">
+
+                        <p style="margin: 5px 0;">
+                            <strong>Ticket-ID:</strong>
+                            <span style="
+                                font-size: 1.1em;
+                                color: #e65c00;
+                                font-weight: bold;
+                            ">
+                                ${ticketId}
+                            </span>
+                        </p>
+
+                        <p style="margin: 5px 0;">
+                            <strong>Sitzplatz:</strong> ${seat}
+                        </p>
+
+                        <p style="margin: 5px 0;">
+                            <strong>Preis:</strong> ${eventConfig.price} €
+                        </p>
+
+                        <p style="margin: 5px 0;">
+                            <strong>Datum:</strong>
+                            ${eventConfig.date} um ${eventConfig.time}
+                        </p>
+
+                        <p style="margin: 5px 0;">
+                            <strong>Ort:</strong>
+                            ${eventConfig.location}
+                        </p>
+
                     </div>
 
-                    <div style="text-align: center; margin: 20px 0;">
-                        <img src="${qrCodeDataUrl}" alt="QR-Code Ticket" style="width: 180px; height: 180px; border: 1px solid #ddd; padding: 5px; background: #fff; border-radius: 8px;" />
-                        <p style="font-size: 0.85em; color: #666; margin-top: 8px;">Zeige diesen QR-Code einfach am Einlass auf deinem Smartphone vor.</p>
+                    <div style="
+                        text-align: center;
+                        margin: 20px 0;
+                    ">
+
+                        <img
+                            src="cid:${qrCodeContentId}"
+                            alt="QR-Code Ticket"
+                            width="180"
+                            height="180"
+                            style="
+                                display: block;
+                                width: 180px;
+                                height: 180px;
+                                border: 1px solid #ddd;
+                                padding: 5px;
+                                background: #fff;
+                                border-radius: 8px;
+                                margin: 0 auto;
+                            "
+                        />
+
+                        <p style="
+                            font-size: 0.85em;
+                            color: #666;
+                            margin-top: 8px;
+                        ">
+                            Zeige diesen QR-Code einfach am Einlass
+                            auf deinem Smartphone vor.
+                        </p>
+
                     </div>
 
-                    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                    <p style="text-align:center;"><a href="${SITE_URL}/?cancelToken=${encodeURIComponent(cancellationToken)}" style="color:#d32f2f;font-weight:bold;">Ticket stornieren</a></p>
-                    <p style="font-size:0.75em;color:#888;text-align:center;">Die Stornierung ist nur über diesen persönlichen Link möglich.</p>
-                    <p style="font-size: 0.8em; color: #888; text-align: center;">Wir freuen uns auf deinen Besuch!</p>
+                    <hr style="
+                        border: none;
+                        border-top: 1px solid #eee;
+                        margin: 20px 0;
+                    ">
+
+                    <p style="text-align:center;">
+                        <a
+                            href="${SITE_URL}/?cancelToken=${encodeURIComponent(cancellationToken)}"
+                            style="
+                                color:#d32f2f;
+                                font-weight:bold;
+                            "
+                        >
+                            Ticket stornieren
+                        </a>
+                    </p>
+
+                    <p style="
+                        font-size:0.75em;
+                        color:#888;
+                        text-align:center;
+                    ">
+                        Die Stornierung ist nur über diesen persönlichen Link möglich.
+                    </p>
+
+                    <p style="
+                        font-size:0.8em;
+                        color:#888;
+                        text-align:center;
+                    ">
+                        Wir freuen uns auf deinen Besuch!
+                    </p>
+
                 </div>
-            `
+            `,
+
+            // QR-Code als echtes Inline-Bild anhängen.
+            // Resend verwendet contentId zusammen mit cid: im HTML.
+            attachments: [
+                {
+                    filename: `ticket-${ticketId}-qr.png`,
+                    content: qrCodeBuffer.toString('base64'),
+                    contentType: 'image/png',
+                    contentId: qrCodeContentId
+                }
+            ]
         });
 
         if (data.error) {
             console.error("Resend API Fehler:", data.error);
-            return res.status(400).json({ error: data.error });
+
+            return res.status(400).json({
+                error: data.error
+            });
         }
 
-        res.status(200).json({ success: true, data });
+        res.status(200).json({
+            success: true,
+            data
+        });
+
     } catch (error) {
         console.error("Resend Fehler:", error);
-        res.status(500).json({ error: error.message });
+
+        res.status(500).json({
+            error: error.message
+        });
     }
 });
 
-
-// Persönliche Ticket-Stornierung: nur mit dem geheimen Link aus der Ticket-E-Mail.
+// Persönliche Ticket-Stornierung:
+// nur mit dem geheimen Link aus der Ticket-E-Mail.
 app.post('/cancel-ticket', async (req, res) => {
     const token = String(req.body?.token || '');
-    if (!token) return res.status(400).json({ error: 'Ungültiger Stornierungslink.' });
+
+    if (!token) {
+        return res.status(400).json({
+            error: 'Ungültiger Stornierungslink.'
+        });
+    }
 
     try {
-        const snapshot = await adminDb.collection('tickets').where('cancellationToken', '==', token).limit(1).get();
-        if (snapshot.empty) return res.status(400).json({ error: 'Ungültiger oder bereits verwendeter Stornierungslink.' });
+        const snapshot = await adminDb
+            .collection('tickets')
+            .where('cancellationToken', '==', token)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            return res.status(400).json({
+                error: 'Ungültiger oder bereits verwendeter Stornierungslink.'
+            });
+        }
 
         const ref = snapshot.docs[0].ref;
         const ticketId = snapshot.docs[0].id;
         const snap = snapshot.docs[0];
-        if (!snap.exists) return res.status(404).json({ error: 'Ticket nicht gefunden.' });
+
+        if (!snap.exists) {
+            return res.status(404).json({
+                error: 'Ticket nicht gefunden.'
+            });
+        }
 
         const ticket = snap.data();
+
         if (ticket.status !== 'GÜLTIG') {
-            return res.status(400).json({ error: 'Dieses Ticket kann nicht mehr über diesen Link storniert werden.' });
+            return res.status(400).json({
+                error: 'Dieses Ticket kann nicht mehr über diesen Link storniert werden.'
+            });
         }
 
         await ref.update({
@@ -299,38 +532,79 @@ app.post('/cancel-ticket', async (req, res) => {
             cancellationToken: admin.firestore.FieldValue.delete()
         });
 
-        return res.json({ success: true, ticketId });
+        return res.json({
+            success: true,
+            ticketId
+        });
+
     } catch (error) {
         console.error('Stornierungsfehler:', error);
-        return res.status(500).json({ error: error.message });
+
+        return res.status(500).json({
+            error: error.message
+        });
     }
 });
 
 // Admin-Stornierung mit auswählbaren Stornierungsgründen.
-// Nach der Stornierung wird automatisch eine zweite E-Mail an den Ticket-Inhaber gesendet.
+// Nach der Stornierung wird automatisch eine zweite E-Mail
+// an den Ticket-Inhaber gesendet.
 app.post('/admin-cancel-ticket', async (req, res) => {
     try {
         const authHeader = req.get('authorization') || '';
-        const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-        if (!idToken) return res.status(401).json({ error: 'Admin-Anmeldung fehlt.' });
+        const idToken =
+            authHeader.startsWith('Bearer ')
+                ? authHeader.slice(7)
+                : null;
+
+        if (!idToken) {
+            return res.status(401).json({
+                error: 'Admin-Anmeldung fehlt.'
+            });
+        }
 
         await admin.auth().verifyIdToken(idToken);
 
-        const ticketId = String(req.body?.ticketId || '').trim();
-        const reasons = Array.isArray(req.body?.reasons)
-            ? req.body.reasons.map(v => String(v).trim()).filter(Boolean)
-            : [];
+        const ticketId =
+            String(req.body?.ticketId || '').trim();
 
-        if (!ticketId) return res.status(400).json({ error: 'Ticket-ID fehlt.' });
-        if (!reasons.length) return res.status(400).json({ error: 'Bitte mindestens einen Stornierungsgrund auswählen.' });
+        const reasons =
+            Array.isArray(req.body?.reasons)
+                ? req.body.reasons
+                    .map(v => String(v).trim())
+                    .filter(Boolean)
+                : [];
 
-        const ticketRef = adminDb.collection('tickets').doc(ticketId);
-        const ticketSnap = await ticketRef.get();
-        if (!ticketSnap.exists) return res.status(404).json({ error: 'Ticket nicht gefunden.' });
+        if (!ticketId) {
+            return res.status(400).json({
+                error: 'Ticket-ID fehlt.'
+            });
+        }
+
+        if (!reasons.length) {
+            return res.status(400).json({
+                error: 'Bitte mindestens einen Stornierungsgrund auswählen.'
+            });
+        }
+
+        const ticketRef =
+            adminDb.collection('tickets').doc(ticketId);
+
+        const ticketSnap =
+            await ticketRef.get();
+
+        if (!ticketSnap.exists) {
+            return res.status(404).json({
+                error: 'Ticket nicht gefunden.'
+            });
+        }
 
         const ticket = ticketSnap.data();
+
         if (!['GÜLTIG', 'ENTWERTET'].includes(ticket.status)) {
-            return res.status(400).json({ error: `Dieses Ticket kann nicht mehr storniert werden (Status: ${ticket.status || 'unbekannt'}).` });
+            return res.status(400).json({
+                error: `Dieses Ticket kann nicht mehr storniert werden (Status: ${ticket.status || 'unbekannt'}).`
+            });
         }
 
         await ticketRef.update({
@@ -341,49 +615,139 @@ app.post('/admin-cancel-ticket', async (req, res) => {
             cancellationToken: admin.firestore.FieldValue.delete()
         });
 
-        const recipient = String(ticket.email || '').trim();
+        const recipient =
+            String(ticket.email || '').trim();
+
         if (!recipient || recipient.endsWith('@kasse.local')) {
-            return res.json({ success: true, emailSent: false, message: 'Ticket storniert. Für dieses Ticket ist keine normale E-Mail-Adresse hinterlegt.' });
+            return res.json({
+                success: true,
+                emailSent: false,
+                message:
+                    'Ticket storniert. Für dieses Ticket ist keine normale E-Mail-Adresse hinterlegt.'
+            });
         }
 
-        const safeName = String(ticket.name || 'Gast');
-        const safeSeat = String(ticket.seat || '');
-        const reasonHtml = reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('');
+        const safeName =
+            String(ticket.name || 'Gast');
 
-        const emailResult = await resend.emails.send({
-            from: SENDER,
-            to: [recipient],
-            subject: `Wichtige Information zu deinem Ticket ${ticketId}`,
-            html: `
-                <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#fff;border:1px solid #eee;border-radius:14px;">
-                    <h2 style="color:#d32f2f;margin-top:0;">Dein Ticket wurde storniert</h2>
-                    <p>Hallo <strong>${escapeHtml(safeName)}</strong>,</p>
-                    <p>leider müssen wir dir mitteilen, dass dein Ticket <strong>${escapeHtml(ticketId)}</strong> für den Sitzplatz <strong>${escapeHtml(safeSeat)}</strong> von der Konzertverwaltung storniert wurde.</p>
-                    <p><strong>Grund:</strong></p>
-                    <ul>${reasonHtml}</ul>
-                    <p>Wenn du Fragen zur Stornierung hast oder weitere Informationen benötigst, melde dich bitte bei:</p>
-                    <p style="font-size:16px;"><strong><a href="mailto:jonas.p.hohl@gmail.com">jonas.p.hohl@gmail.com</a></strong></p>
-                    <p>Wir entschuldigen uns für die Umstände.</p>
-                    <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
-                    <p style="font-size:12px;color:#777;text-align:center;">Sing & Tanz Konzert · Diese E-Mail wurde automatisch versendet.</p>
-                </div>
-            `
-        });
+        const safeSeat =
+            String(ticket.seat || '');
+
+        const reasonHtml =
+            reasons
+                .map(reason => `<li>${escapeHtml(reason)}</li>`)
+                .join('');
+
+        const emailResult =
+            await resend.emails.send({
+                from: SENDER,
+                to: [recipient],
+                subject:
+                    `Wichtige Information zu deinem Ticket ${ticketId}`,
+
+                html: `
+                    <div style="
+                        font-family:Arial,sans-serif;
+                        max-width:560px;
+                        margin:0 auto;
+                        padding:24px;
+                        background:#fff;
+                        border:1px solid #eee;
+                        border-radius:14px;
+                    ">
+
+                        <h2 style="
+                            color:#d32f2f;
+                            margin-top:0;
+                        ">
+                            Dein Ticket wurde storniert
+                        </h2>
+
+                        <p>
+                            Hallo <strong>${escapeHtml(safeName)}</strong>,
+                        </p>
+
+                        <p>
+                            leider müssen wir dir mitteilen, dass dein Ticket
+                            <strong>${escapeHtml(ticketId)}</strong>
+                            für den Sitzplatz
+                            <strong>${escapeHtml(safeSeat)}</strong>
+                            von der Konzertverwaltung storniert wurde.
+                        </p>
+
+                        <p>
+                            <strong>Grund:</strong>
+                        </p>
+
+                        <ul>
+                            ${reasonHtml}
+                        </ul>
+
+                        <p>
+                            Wenn du Fragen zur Stornierung hast oder weitere
+                            Informationen benötigst, melde dich bitte bei:
+                        </p>
+
+                        <p style="font-size:16px;">
+                            <strong>
+                                <a href="mailto:jonas.p.hohl@gmail.com">
+                                    jonas.p.hohl@gmail.com
+                                </a>
+                            </strong>
+                        </p>
+
+                        <p>
+                            Wir entschuldigen uns für die Umstände.
+                        </p>
+
+                        <hr style="
+                            border:none;
+                            border-top:1px solid #eee;
+                            margin:20px 0;
+                        ">
+
+                        <p style="
+                            font-size:12px;
+                            color:#777;
+                            text-align:center;
+                        ">
+                            Sing & Tanz Konzert ·
+                            Diese E-Mail wurde automatisch versendet.
+                        </p>
+
+                    </div>
+                `
+            });
 
         if (emailResult.error) {
-            console.error('Stornierungs-E-Mail Fehler:', emailResult.error);
+            console.error(
+                'Stornierungs-E-Mail Fehler:',
+                emailResult.error
+            );
+
             return res.status(207).json({
                 success: true,
                 emailSent: false,
-                warning: 'Das Ticket wurde storniert, aber die zweite E-Mail konnte nicht versendet werden.',
+                warning:
+                    'Das Ticket wurde storniert, aber die zweite E-Mail konnte nicht versendet werden.',
                 emailError: emailResult.error
             });
         }
 
-        return res.json({ success: true, emailSent: true });
+        return res.json({
+            success: true,
+            emailSent: true
+        });
+
     } catch (error) {
-        console.error('Admin-Stornierungsfehler:', error);
-        res.status(500).json({ error: error.message });
+        console.error(
+            'Admin-Stornierungsfehler:',
+            error
+        );
+
+        res.status(500).json({
+            error: error.message
+        });
     }
 });
 
@@ -396,36 +760,84 @@ function escapeHtml(value) {
         .replace(/'/g, '&#039;');
 }
 
-// Admin-E-Mail-Versand. Der Firebase-Login des Admins wird serverseitig geprüft.
+// Admin-E-Mail-Versand.
+// Der Firebase-Login des Admins wird serverseitig geprüft.
 app.post('/admin-send-email', async (req, res) => {
     try {
-        const authHeader = req.get('authorization') || '';
-        const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-        if (!idToken) return res.status(401).json({ error: 'Admin-Anmeldung fehlt.' });
+        const authHeader =
+            req.get('authorization') || '';
+
+        const idToken =
+            authHeader.startsWith('Bearer ')
+                ? authHeader.slice(7)
+                : null;
+
+        if (!idToken) {
+            return res.status(401).json({
+                error: 'Admin-Anmeldung fehlt.'
+            });
+        }
 
         await admin.auth().verifyIdToken(idToken);
 
-        const { to, subject, html } = req.body || {};
-        if (!to || !subject || !html) return res.status(400).json({ error: 'Empfänger, Betreff und Inhalt sind erforderlich.' });
+        const { to, subject, html } =
+            req.body || {};
 
-        const result = await resend.emails.send({
-            from: SENDER,
-            to: [String(to).trim()],
-            subject: String(subject).trim(),
-            html: String(html)
+        if (!to || !subject || !html) {
+            return res.status(400).json({
+                error:
+                    'Empfänger, Betreff und Inhalt sind erforderlich.'
+            });
+        }
+
+        const result =
+            await resend.emails.send({
+                from: SENDER,
+                to: [String(to).trim()],
+                subject: String(subject).trim(),
+                html: String(html)
+            });
+
+        if (result.error) {
+            return res.status(400).json({
+                error: result.error
+            });
+        }
+
+        res.json({
+            success: true,
+            data: result.data
         });
 
-        if (result.error) return res.status(400).json({ error: result.error });
-        res.json({ success: true, data: result.data });
     } catch (error) {
-        console.error('Admin-E-Mail-Fehler:', error);
-        res.status(500).json({ error: error.message });
+        console.error(
+            'Admin-E-Mail-Fehler:',
+            error
+        );
+
+        res.status(500).json({
+            error: error.message
+        });
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT =
+    process.env.PORT || 3000;
 
-// Abgelaufene Reservierungen regelmäßig freigeben. Zusätzlich prüft das Frontend expiresAt.
-setInterval(cleanupExpiredReservations, 15000);
-setTimeout(cleanupExpiredReservations, 3000);
-app.listen(PORT, () => console.log(`Server läuft auf Port ${PORT}`));
+// Abgelaufene Reservierungen regelmäßig freigeben.
+// Zusätzlich prüft das Frontend expiresAt.
+setInterval(
+    cleanupExpiredReservations,
+    15000
+);
+
+setTimeout(
+    cleanupExpiredReservations,
+    3000
+);
+
+app.listen(
+    PORT,
+    () => console.log(`Server läuft auf Port ${PORT}`)
+);
+```
