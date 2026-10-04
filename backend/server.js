@@ -1,4 +1,3 @@
-```javascript
 const express = require('express');
 const cors = require('cors');
 const { Resend } = require('resend');
@@ -821,6 +820,257 @@ app.post('/admin-send-email', async (req, res) => {
     }
 });
 
+
+// ============================================================
+// EINLASS-SCANNER / RASPBERRY PI
+// ============================================================
+// Der Raspberry Pi authentifiziert sich mit SCANNER_API_KEY.
+// Das Ticket wird serverseitig per Firestore-Transaktion geändert,
+// damit zwei gleichzeitig eintreffende Scans nicht beide akzeptiert werden.
+
+function requireScannerKey(req, res) {
+    const configuredKey = String(process.env.SCANNER_API_KEY || '').trim();
+    const suppliedKey = String(req.get('x-scanner-key') || '').trim();
+
+    if (!configuredKey) {
+        console.error('SCANNER_API_KEY fehlt in Render.');
+        res.status(500).json({
+            success: false,
+            code: 'SCANNER_NOT_CONFIGURED',
+            message: 'Der Einlass-Scanner ist serverseitig nicht konfiguriert.'
+        });
+        return false;
+    }
+
+    if (!suppliedKey || suppliedKey !== configuredKey) {
+        res.status(401).json({
+            success: false,
+            code: 'UNAUTHORIZED_SCANNER',
+            message: 'Scanner nicht autorisiert.'
+        });
+        return false;
+    }
+
+    return true;
+}
+
+app.post('/scan-ticket', async (req, res) => {
+    if (!requireScannerKey(req, res)) return;
+
+    const ticketId = String(req.body?.ticketId || '').trim();
+    const action = String(req.body?.action || 'EINLASS').trim().toUpperCase();
+    const scannerName = String(req.body?.scannerName || 'Raspberry Pi').trim().slice(0, 100);
+    const reentryPin = String(req.body?.reentryPin || '');
+
+    if (!ticketId) {
+        return res.status(400).json({
+            success: false,
+            code: 'MISSING_TICKET_ID',
+            message: 'Keine Ticket-ID erkannt.'
+        });
+    }
+
+    if (!['CHECK', 'EINLASS', 'WIEDEREINTRITT'].includes(action)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_ACTION',
+            message: 'Ungültige Scanner-Aktion.'
+        });
+    }
+
+    if (action === 'WIEDEREINTRITT') {
+        const configuredPin = String(process.env.ENTRY_REENTRY_PIN || '');
+        if (!configuredPin || !reentryPin || reentryPin !== configuredPin) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_REENTRY_PIN',
+                message: 'Wiedereintritt-PIN ist falsch.'
+            });
+        }
+    }
+
+    try {
+        const ticketRef = adminDb.collection('tickets').doc(ticketId);
+        const now = new Date().toISOString();
+        let result;
+
+        await adminDb.runTransaction(async transaction => {
+            const snapshot = await transaction.get(ticketRef);
+
+            if (!snapshot.exists) {
+                result = {
+                    httpStatus: 404,
+                    body: {
+                        success: false,
+                        code: 'NOT_FOUND',
+                        message: 'Ticket nicht gefunden.'
+                    }
+                };
+                return;
+            }
+
+            const ticket = snapshot.data();
+            const status = String(ticket.status || 'UNBEKANNT');
+
+            if (status === 'STORNIERT') {
+                result = {
+                    httpStatus: 403,
+                    body: {
+                        success: false,
+                        code: 'CANCELLED',
+                        status,
+                        message: 'Ticket ist storniert.'
+                    }
+                };
+                return;
+            }
+
+            if (action === 'CHECK') {
+                result = {
+                    httpStatus: 200,
+                    body: {
+                        success: status === 'GÜLTIG',
+                        code: status === 'GÜLTIG' ? 'VALID' : 'ALREADY_USED',
+                        status,
+                        message: status === 'GÜLTIG'
+                            ? 'Ticket ist gültig.'
+                            : `Ticket kann nicht eingelassen werden (Status: ${status}).`,
+                        ticket: {
+                            ticketId,
+                            name: String(ticket.name || 'Gast'),
+                            seat: String(ticket.seat || '')
+                        }
+                    }
+                };
+                return;
+            }
+
+            if (action === 'EINLASS') {
+                if (status !== 'GÜLTIG') {
+                    result = {
+                        httpStatus: 403,
+                        body: {
+                            success: false,
+                            code: status === 'ENTWERTET' ? 'ALREADY_USED' : 'NOT_VALID',
+                            status,
+                            message: status === 'ENTWERTET'
+                                ? 'Ticket wurde bereits eingelassen.'
+                                : `Ticket ist nicht gültig (Status: ${status}).`,
+                            ticket: {
+                                ticketId,
+                                name: String(ticket.name || 'Gast'),
+                                seat: String(ticket.seat || '')
+                            }
+                        }
+                    };
+                    return;
+                }
+
+                transaction.update(ticketRef, {
+                    status: 'ENTWERTET',
+                    lastEntryAt: now,
+                    lastScanAt: now,
+                    lastScanAction: 'EINLASS',
+                    lastScanner: scannerName,
+                    entryCount: admin.firestore.FieldValue.increment(1)
+                });
+
+                const logRef = ticketRef.collection('scanLog').doc();
+                transaction.set(logRef, {
+                    action: 'EINLASS',
+                    result: 'ACCEPTED',
+                    scannerName,
+                    timestamp: now
+                });
+
+                result = {
+                    httpStatus: 200,
+                    body: {
+                        success: true,
+                        code: 'ENTRY_ACCEPTED',
+                        status: 'ENTWERTET',
+                        message: 'Einlass erlaubt.',
+                        ticket: {
+                            ticketId,
+                            name: String(ticket.name || 'Gast'),
+                            seat: String(ticket.seat || '')
+                        }
+                    }
+                };
+                return;
+            }
+
+            // WIEDEREINTRITT: ausschließlich ENTWERTET -> GÜLTIG.
+            // STORNIERT wurde oben bereits ausgeschlossen.
+            if (status !== 'ENTWERTET') {
+                result = {
+                    httpStatus: 403,
+                    body: {
+                        success: false,
+                        code: status === 'GÜLTIG' ? 'ALREADY_ACTIVE' : 'NOT_REACTIVATABLE',
+                        status,
+                        message: status === 'GÜLTIG'
+                            ? 'Ticket ist bereits für den Einlass freigegeben.'
+                            : `Ticket kann nicht reaktiviert werden (Status: ${status}).`,
+                        ticket: {
+                            ticketId,
+                            name: String(ticket.name || 'Gast'),
+                            seat: String(ticket.seat || '')
+                        }
+                    }
+                };
+                return;
+            }
+
+            transaction.update(ticketRef, {
+                status: 'GÜLTIG',
+                lastReentryAt: now,
+                lastScanAt: now,
+                lastScanAction: 'WIEDEREINTRITT',
+                lastScanner: scannerName,
+                reentryCount: admin.firestore.FieldValue.increment(1)
+            });
+
+            const logRef = ticketRef.collection('scanLog').doc();
+            transaction.set(logRef, {
+                action: 'WIEDEREINTRITT',
+                result: 'ACCEPTED',
+                scannerName,
+                timestamp: now
+            });
+
+            result = {
+                httpStatus: 200,
+                body: {
+                    success: true,
+                    code: 'REENTRY_ACCEPTED',
+                    status: 'GÜLTIG',
+                    message: 'Wiedereintritt freigegeben.',
+                    ticket: {
+                        ticketId,
+                        name: String(ticket.name || 'Gast'),
+                        seat: String(ticket.seat || '')
+                    }
+                }
+            };
+        });
+
+        return res.status(result.httpStatus).json(result.body);
+    } catch (error) {
+        console.error('Ticket-Scan Fehler:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'SERVER_ERROR',
+            message: 'Serverfehler beim Prüfen des Tickets.'
+        });
+    }
+});
+
+app.get('/scanner-health', (req, res) => {
+    if (!requireScannerKey(req, res)) return;
+    res.json({ success: true, scannerApi: true });
+});
+
 const PORT =
     process.env.PORT || 3000;
 
@@ -840,4 +1090,3 @@ app.listen(
     PORT,
     () => console.log(`Server läuft auf Port ${PORT}`)
 );
-```
