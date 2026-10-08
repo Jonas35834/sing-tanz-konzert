@@ -24,6 +24,9 @@ let isScannerRunning = false;
 const BACKEND_BASE_URL = 'https://backend.sing-tanz.jonas-hohl.de';
 const RESERVATION_MS = 5 * 60 * 1000;
 
+// Scanner-API-Key wird einmalig pro Browser abgefragt und in localStorage gespeichert
+let SCANNER_API_KEY = localStorage.getItem('scannerApiKey') || '';
+
 let eventConfig = {
     title: "Sing & Tanz Konzert",
     date: "15. November 2026",
@@ -84,7 +87,6 @@ document.getElementById('event-settings-form').addEventListener('submit', async 
         alert("Fehler beim Speichern: " + err.message);
     }
 });
-
 
 document.getElementById('admin-email-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -154,8 +156,6 @@ function loadLayoutAndBookings() {
         renderPosSeating();
     });
 }
-
-
 
 async function adminCancelTicket(ticketId, ticket) {
     const reasons = [
@@ -456,8 +456,6 @@ async function handleEmailVerificationReturn() {
 
         let pendingTicketId = window.localStorage.getItem("pendingTicketId");
 
-        // Falls der Bestätigungslink auf einem anderen Gerät geöffnet wird,
-        // suchen wir die offene Buchung zusätzlich über die E-Mail-Adresse.
         if (!pendingTicketId) {
             const pendingSnapshot = await db
                 .collection("tickets")
@@ -480,7 +478,6 @@ async function handleEmailVerificationReturn() {
             );
         }
 
-        // Den langen Firebase-Link aus der Adresszeile entfernen.
         window.history.replaceState(
             {},
             document.title,
@@ -591,8 +588,6 @@ document.getElementById("booking-form").addEventListener("submit", async (e) => 
     try {
         const currentUser = auth.currentUser;
 
-        // Falls der Besucher bereits über den E-Mail-Link angemeldet
-        // und verifiziert ist, kann die Buchung direkt abgeschlossen werden.
         if (
             currentUser &&
             currentUser.email &&
@@ -666,6 +661,10 @@ document.getElementById("booking-form").addEventListener("submit", async (e) => 
 // Firebase-E-Mail-Link zurück auf die Webseite gekommen ist.
 handleEmailVerificationReturn();
 
+// ============================================================
+// KASSEN-VERKAUF (POS)
+// ============================================================
+
 document.getElementById('pos-submit-btn').onclick = async () => {
     if (posSelectedSeats.length === 0) {
         alert("Wähle mindestens einen Platz aus!");
@@ -702,6 +701,10 @@ document.getElementById('pos-submit-btn').onclick = async () => {
     }
 };
 
+// ============================================================
+// SCANNER (Einlass + Wiedereintritt) — nutzt Backend-Endpunkt
+// ============================================================
+
 document.getElementById('check-ticket-btn').onclick = () => {
     const id = document.getElementById('manual-ticket-id').value.trim();
     if (id) processTicketScan(id);
@@ -713,36 +716,107 @@ document.getElementById('restart-scanner-btn').onclick = () => {
     startQRScanner();
 };
 
-async function processTicketScan(ticketId) {
+// Umschaltung zwischen Einlass- und Wiedereintritt-Modus
+document.querySelectorAll('input[name="scan-action"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        const pinBox = document.getElementById('reentry-pin-box');
+        const isReentry = getSelectedScanAction() === 'WIEDEREINTRITT';
+        pinBox.classList.toggle('hidden', !isReentry);
+
+        // Altes Ergebnis ausblenden, damit nichts verwirrt
+        document.getElementById('scan-result').classList.add('hidden');
+    });
+});
+
+function getSelectedScanAction() {
+    const checked = document.querySelector('input[name="scan-action"]:checked');
+    return checked ? checked.value : 'EINLASS';
+}
+
+function getReentryPin() {
+    const pinInput = document.getElementById('reentry-pin');
+    return pinInput ? pinInput.value.trim() : '';
+}
+
+function setScanResult(type, text) {
     const resultEl = document.getElementById('scan-result');
-    resultEl.classList.remove('hidden', 'valid', 'invalid');
+    resultEl.classList.remove('hidden', 'valid', 'invalid', 'warning');
+    resultEl.classList.add(type);
+    resultEl.innerText = text;
+}
+
+async function processTicketScan(ticketId) {
+    ticketId = String(ticketId || '').trim();
+    if (!ticketId) return;
+
+    const action = getSelectedScanAction();
+
+    // Scanner-Key abfragen, falls noch nicht vorhanden
+    if (!SCANNER_API_KEY) {
+        const entered = prompt('Scanner-API-Key eingeben (nur einmalig pro Gerät nötig):');
+        if (!entered) {
+            setScanResult('warning', '⚠️ Kein Scanner-Key hinterlegt. Scan abgebrochen.');
+            return;
+        }
+        SCANNER_API_KEY = entered.trim();
+        localStorage.setItem('scannerApiKey', SCANNER_API_KEY);
+    }
+
+    const body = {
+        ticketId,
+        scannerName: 'Web-Admin-POS',
+        action
+    };
+
+    if (action === 'WIEDEREINTRITT') {
+        const pin = getReentryPin();
+        if (!pin) {
+            setScanResult('warning', '🔒 Bitte zuerst die PIN für den Wiedereintritt eingeben.');
+            return;
+        }
+        body.reentryPin = pin;
+    }
+
+    setScanResult('warning', '⏳ Prüfe Ticket…');
 
     try {
-        const docRef = db.collection('tickets').doc(ticketId);
-        const doc = await docRef.get();
+        const response = await fetch(`${BACKEND_BASE_URL}/scan-ticket`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-scanner-key': SCANNER_API_KEY
+            },
+            body: JSON.stringify(body)
+        });
 
-        if (!doc.exists) {
-            resultEl.classList.add('invalid');
-            resultEl.innerText = `❌ UNGÜLTIG: Ticket ${ticketId} existiert nicht!`;
+        const data = await response.json().catch(() => ({}));
+
+        // Falscher Key → zurücksetzen und beim nächsten Scan neu abfragen
+        if (response.status === 401) {
+            localStorage.removeItem('scannerApiKey');
+            SCANNER_API_KEY = '';
+            setScanResult('invalid', '❌ Scanner nicht autorisiert. Bitte API-Key prüfen.');
             return;
         }
 
-        const data = doc.data();
-        if (data.status === 'ENTWERTET') {
-            resultEl.classList.add('invalid');
-            resultEl.innerText = `⚠️ BEREITS ENTWERTET: Dieses Ticket (Platz ${data.seat}) wurde schon genutzt!`;
-        } else {
-            await docRef.update({ status: 'ENTWERTET' });
-            resultEl.classList.add('valid');
-            resultEl.innerText = `✅ GÜLTIG! Einlass gewährt für ${data.name} (Platz: ${data.seat})`;
-            
+        const accepted = data.success === true;
+        const icon = accepted ? '✅' : '❌';
+        const seatInfo = data.ticket?.seat ? ` (Platz ${data.ticket.seat})` : '';
+        const nameInfo = data.ticket?.name ? ` – ${data.ticket.name}` : '';
+
+        if (accepted) {
+            setScanResult('valid', `${icon} ${data.message}${nameInfo}${seatInfo}`);
             await stopQRScanner();
             document.getElementById('restart-scanner-btn').classList.remove('hidden');
+        } else {
+            if (data.result === 'PIN_FALSCH') {
+                setScanResult('warning', `🔒 ${data.message}`);
+                return;
+            }
+            setScanResult('invalid', `${icon} ${data.message}${nameInfo}${seatInfo}`);
         }
-
     } catch (err) {
-        resultEl.classList.add('invalid');
-        resultEl.innerText = "Fehler beim Scannen: " + err.message;
+        setScanResult('invalid', '❌ Fehler beim Scannen: ' + err.message);
     }
 }
 
@@ -780,6 +854,10 @@ async function stopQRScanner() {
         }
     }
 }
+
+// ============================================================
+// ADMIN: Saalplan-Editor
+// ============================================================
 
 function renderAdminEditor() {
     const el = document.getElementById('admin-seating-editor');
@@ -859,6 +937,10 @@ document.getElementById('save-layout-btn').onclick = () => {
         .then(() => alert("Saalplan erfolgreich gespeichert!"))
         .catch(err => alert("Fehler beim Speichern: " + err.message));
 };
+
+// ============================================================
+// POS-MODUS (Vollbild-Kasse)
+// ============================================================
 
 const posContainer = document.getElementById('pos-mode-container');
 
@@ -953,6 +1035,10 @@ function togglePosSeatSelection(seatId) {
     document.getElementById('pos-total-price').innerText = (posSelectedSeats.length * eventConfig.price).toFixed(2);
     renderPosSeating();
 }
+
+// ============================================================
+// ADMIN-LOGIN / LOGOUT
+// ============================================================
 
 document.getElementById('admin-login-btn').onclick = () => document.getElementById('login-modal').classList.remove('hidden');
 document.getElementById('close-login-btn').onclick = () => document.getElementById('login-modal').classList.add('hidden');
