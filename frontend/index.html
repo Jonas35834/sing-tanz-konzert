@@ -118,6 +118,25 @@
             
             <div class="scanner-section card">
                 <h4>Ticket scannen & entwerten</h4>
+
+                <div class="scan-mode-switch">
+                    <label>
+                        <input type="radio" name="scan-action" value="EINLASS" checked>
+                        🎟️ Einlass
+                    </label>
+                    <label>
+                        <input type="radio" name="scan-action" value="WIEDEREINTRITT">
+                        🔁 Wiedereintritt
+                    </label>
+                </div>
+
+                <div id="reentry-pin-box" class="hidden" style="margin:10px 0;">
+                    <label>
+                        PIN für Wiedereintritt:
+                        <input type="password" id="reentry-pin" placeholder="PIN eingeben">
+                    </label>
+                </div>
+
                 <div id="reader" style="width: 100%; max-width: 400px; margin: 0 auto;"></div>
                 <button id="restart-scanner-btn" class="btn-primary hidden" style="margin-top: 10px;">📷 Nächsten Code scannen</button>
                 
@@ -138,8 +157,7 @@
                 <h4>Gewählte Plätze: <span id="pos-seats-list">-</span></h4>
                 <h4>Summe Barzahlung: <span id="pos-total-price">0.00</span> €</h4>
                 
-                <div id="pos-names-container">
-                    </div>
+                <div id="pos-names-container"></div>
 
                 <button id="pos-submit-btn" class="btn-primary" style="margin-top: 15px;">Barzahlung abschließen</button>
             </div>
